@@ -1,0 +1,191 @@
+# AuPd nanoparticle, heating
+#1 general
+units		metal
+dimension	3
+atom_style      atomic
+neighbor        0.3 bin
+
+#2 structure
+boundary	p p p
+read_data	AuPd_DosFases.lmp
+#mass        1 196.967
+#mass		2 106.42
+
+
+#3 variables
+# Variables que controlan extension de simulacion
+variable        tstep equal 0.001
+variable nramp equal 200000
+variable nequil equal 100000
+variable nstat equal 100000
+variable ntherm equal v_nequil/10
+variable ndump equal v_nstat/20
+
+# temperatura de melting
+variable   tempm equal 1000
+variable 	natoms equal "count(all)"
+variable	temp0 equal 1.0
+variable    	temp1 equal 700
+variable tempa equal v_tempm-50
+variable    tempb equal v_tempm+50
+variable    	temp2 equal 1300
+variable n1 equal (v_tempa-v_temp1)/50
+variable n2 equal (v_tempb-v_tempa)/50
+variable n3 equal (v_temp2-v_tempb)/50
+variable	pressure equal 0.0
+
+
+#4 potentials
+pair_style eam/fs
+pair_coeff * * AuPd.fs Au Pd
+
+#5 optimize at 0 K
+#dump           1 all custom 1 dump.minimization id type x y z
+#fix		1 all box/relax dilate all #Para relajar la caja
+#min_style	cg
+#minimize	1.0e-6 1.06e-6 10000 10000
+#run 1
+#undump		1
+#unfix		1
+
+#6 optimize at T=1
+compute		peratom all pe/atom
+reset_timestep	0
+timestep	${tstep}
+
+#Se generan velocidades aleatorias
+velocity	all create ${temp0} 12345 mom yes rot yes
+
+#Se realiza NPT
+fix             1 all npt temp ${temp0} ${temp0} 0.1 iso 0.0 0.0 1.0
+dump            1 all custom ${ndump} dump.${temp0} id type x y z c_peratom fx fy fz
+dump_modify   	1 element Au Pd
+thermo		${ntherm}
+thermo_style	custom step temp pe 
+
+#neigh_modify    once yes
+run		${nequil}
+unfix		1
+undump      1
+
+#7 calentamiento
+reset_timestep	0
+
+#Se generan velocidades aleatorias a T inicial
+velocity	all create ${temp1} 12346 mom yes rot yes
+variable	TEMPE equal "1.0*temp"
+variable	PEA equal "pe/v_natoms"
+
+#thermo_style	custom step pe temp PEA
+fix		5 all print 1000 "${TEMPE}   ${PEA}" file TEMPvsPEA.dat screen no
+fix		6 all ave/time 100 1000 400000 v_TEMPE v_PEA file ave.dat
+compute myRDF all rdf 50
+fix 7 all ave/time 100 1000 400000 c_myRDF[*] file tmp.rdf mode vector
+
+#Comienza ciclo de calentamiento
+print	  	"Heating starts, low temperature"
+label		loop
+variable	a loop ${n1}
+variable	newtemp1 equal (v_a-1)*50+v_temp1
+variable	newtemp2 equal v_newtemp1+50
+
+#Rampa de T
+print	  	"Temperature ramp starts"
+fix             1 all npt temp ${newtemp1} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+run		${nramp}
+unfix		1
+
+#Equilibrio a nueva T
+print	  	"Equilibration starts"
+fix		2 all npt temp ${newtemp2} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+run 		${nequil}
+unfix		2
+
+#Se colecta estadistica
+print	  	"Stats collecting starts"
+fix		3 all npt temp ${newtemp2} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+dump            3 all custom ${ndump} dump.${newtemp2} id type x y z c_peratom fx fy fz
+dump_modify   	3 element Au Pd
+run		${nstat}
+unfix		3
+undump		3
+
+#if "${newtemp2} > ${tempa}" then "jump SELF break"
+next a
+jump SELF loop
+
+#label break
+print	  	"Heating continues, close to melting"
+label		loop2
+variable	b loop ${n2}
+variable	newtemp1 equal (v_b-1)*50+v_tempa
+variable	newtemp2 equal v_newtemp1+50
+
+#Rampa de T
+print	  	"Temperature ramp starts"
+fix             1 all npt temp ${newtemp1} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+run		${nramp}
+unfix		1
+
+#Equilibrio a nueva T
+print	  	"Equilibration starts"
+fix		2 all npt temp ${newtemp2} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+run 		${nequil}
+unfix		2
+
+#Se colecta estadistica
+print	  	"Stats collecting starts"
+fix		3 all npt temp ${newtemp2} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+dump            3 all custom ${ndump} dump.${newtemp2} id type x y z c_peratom fx fy fz
+dump_modify   	3 element Au Pd
+
+#neigh_modify    once yes
+run		${nstat}
+unfix		3
+undump		3
+
+#if "${newtemp2} > ${tempb}" then "jump SELF break2"
+next b
+jump SELF loop2
+
+#label break2
+print	  	"Heating starts, high temperature"
+label		loop3
+variable	c loop ${n3}
+variable	newtemp1 equal (v_c-1)*50+v_tempb
+variable	newtemp2 equal v_newtemp1+50
+
+#Rampa de T
+print	  	"Temperature ramp starts"
+fix             1 all npt temp ${newtemp1} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+run		${nramp}
+unfix		1
+
+#Equilibrio a nueva T
+print	  	"Equilibration starts"
+fix		2 all npt temp ${newtemp2} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+run 		${nequil}
+unfix		2
+
+#Se colecta estadistica
+print	  	"Stats collecting starts"
+fix		3 all npt temp ${newtemp2} ${newtemp2} 0.1 iso 0.0 0.0 1.0
+dump            3 all custom ${ndump} dump.${newtemp2} id type x y z c_peratom fx fy fz
+dump_modify   	3 element Au Pd
+
+#neigh_modify    once yes
+run		${nstat}
+unfix		3
+undump		3
+
+#if "${newtemp2} > ${temp2}" then "jump SELF break3"
+next c
+jump SELF loop3
+
+#label break3
+unfix		5
+unfix 		6
+unfix 7
+print "ALL DONE"
+
+
